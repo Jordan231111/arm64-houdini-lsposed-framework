@@ -218,6 +218,55 @@ std::string errno_text(const char *operation) {
     return std::string(buffer);
 }
 
+void push_unique(std::vector<uintptr_t> *values, uintptr_t value) {
+    if (values == nullptr || value == 0) return;
+    if (std::find(values->begin(), values->end(), value) == values->end()) {
+        values->push_back(value);
+    }
+}
+
+bool same_backing_file(const std::string &left, const std::string &right) {
+    std::string a = backing_path(left);
+    std::string b = backing_path(right);
+    return !a.empty() && a[0] != '[' && a == b;
+}
+
+bool file_offset_for_address(const std::vector<MemoryRange> &ranges,
+                             uintptr_t address,
+                             std::size_t len,
+                             uintptr_t *file_offset,
+                             std::string *path) {
+    if (address == 0 || len == 0 || file_offset == nullptr) return false;
+    uintptr_t end = 0;
+    if (!checked_add(address, len, &end)) return false;
+    for (const MemoryRange &range : ranges) {
+        if (address < range.start || end > range.end) continue;
+        *file_offset = range.file_offset + (address - range.start);
+        if (path != nullptr) *path = range.path;
+        return true;
+    }
+    return false;
+}
+
+void append_aliases_for_file_offset(const std::vector<MemoryRange> &ranges,
+                                    uintptr_t file_offset,
+                                    std::size_t len,
+                                    const std::string &source_path,
+                                    bool require_same_path,
+                                    std::vector<uintptr_t> *aliases) {
+    if (len == 0 || aliases == nullptr) return;
+    uintptr_t file_end = 0;
+    if (!checked_add(file_offset, len, &file_end)) return;
+    for (const MemoryRange &range : ranges) {
+        if (range.end <= range.start) continue;
+        if (require_same_path && !same_backing_file(range.path, source_path)) continue;
+        uintptr_t range_file_end = range.file_offset + range.size();
+        if (range_file_end < range.file_offset) continue;
+        if (file_offset < range.file_offset || file_end > range_file_end) continue;
+        push_unique(aliases, range.start + (file_offset - range.file_offset));
+    }
+}
+
 void append_patch_record(const PatchRecord &record) {
     std::lock_guard<std::mutex> lock(g_record_mutex);
     g_patches.push_back(record);
@@ -499,6 +548,74 @@ bool write_memory(uintptr_t address, const void *data, std::size_t len, std::str
     return true;
 }
 
+std::vector<uintptr_t> aliases_for_address(const std::vector<MemoryRange> &known_ranges,
+                                           uintptr_t address,
+                                           std::size_t len) {
+    std::vector<uintptr_t> aliases;
+    if (address == 0 || len == 0) return aliases;
+    push_unique(&aliases, address);
+
+    std::vector<MemoryRange> maps = read_process_maps();
+    uintptr_t file_offset = 0;
+    std::string source_path;
+    bool have_offset = file_offset_for_address(known_ranges, address, len, &file_offset, &source_path);
+    if (!have_offset) {
+        have_offset = file_offset_for_address(maps, address, len, &file_offset, &source_path);
+    }
+    if (!have_offset) return aliases;
+
+    std::string source_backing = backing_path(source_path);
+    bool source_is_file_backed = !source_backing.empty() && source_backing[0] != '[';
+    if (!source_is_file_backed) {
+        return aliases;
+    }
+
+    append_aliases_for_file_offset(known_ranges,
+                                   file_offset,
+                                   len,
+                                   source_path,
+                                   true,
+                                   &aliases);
+    append_aliases_for_file_offset(maps,
+                                   file_offset,
+                                   len,
+                                   source_path,
+                                   true,
+                                   &aliases);
+    return aliases;
+}
+
+bool write_memory_aliases(const std::vector<MemoryRange> &known_ranges,
+                          uintptr_t address,
+                          const void *data,
+                          std::size_t len,
+                          std::vector<uintptr_t> *written_aliases,
+                          std::string *error) {
+    std::vector<uintptr_t> aliases = aliases_for_address(known_ranges, address, len);
+    if (aliases.empty()) {
+        if (error != nullptr) *error = "no writable aliases resolved for target";
+        return false;
+    }
+
+    bool ok = true;
+    std::string last_error;
+    if (written_aliases != nullptr) written_aliases->clear();
+    for (uintptr_t alias : aliases) {
+        std::string alias_error;
+        bool wrote = write_memory(alias, data, len, &alias_error);
+        if (wrote) {
+            if (written_aliases != nullptr) written_aliases->push_back(alias);
+        } else {
+            ok = false;
+            last_error = alias_error;
+        }
+    }
+    if (!ok && error != nullptr) {
+        *error = last_error.empty() ? "one or more alias writes failed" : last_error;
+    }
+    return ok;
+}
+
 bool install_arm64_absolute_jump(const std::string &name,
                                  uintptr_t target,
                                  uintptr_t replacement,
@@ -532,7 +649,8 @@ bool install_arm64_absolute_jump(const std::string &name,
         return false;
     }
 
-    if (!read_memory(target, local.original, sizeof(local.original))) {
+    if (!read_memory(target, local.original, sizeof(local.original)) &&
+        !read_file_backed_memory(target, local.original, sizeof(local.original))) {
         local.message = "could not save original 16-byte prologue";
         if (record != nullptr) *record = local;
         append_patch_record(local);
@@ -546,7 +664,8 @@ bool install_arm64_absolute_jump(const std::string &name,
     };
     std::memcpy(patch + 8, &replacement, sizeof(replacement));
 
-    if (!write_memory(target, patch, sizeof(patch), &error)) {
+    std::vector<MemoryRange> ranges = read_process_maps();
+    if (!write_memory_aliases(ranges, target, patch, sizeof(patch), &local.aliases, &error)) {
         local.message = error;
         if (record != nullptr) *record = local;
         append_patch_record(local);
@@ -554,7 +673,7 @@ bool install_arm64_absolute_jump(const std::string &name,
     }
 
     local.installed = true;
-    local.message = "installed";
+    local.message = "installed aliases=" + std::to_string(local.aliases.size());
     if (record != nullptr) *record = local;
     append_patch_record(local);
     return true;
@@ -584,6 +703,7 @@ std::string status_text() {
             << " replacement=0x" << patch.replacement
             << " return=0x" << patch.return_address
             << std::dec
+            << " aliases=" << patch.aliases.size()
             << " installed=" << (patch.installed ? "yes" : "no")
             << " message=" << patch.message << "\n";
     }

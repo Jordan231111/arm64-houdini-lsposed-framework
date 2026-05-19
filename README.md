@@ -44,6 +44,8 @@ It provides:
 - Bounded waiting for game libraries that load after `Application.attach`.
 - IDA-style pattern parser and scanner for ARM64 byte signatures.
 - File-backed code reading, useful for checking original ARM64 bytes from mapped APK/SO pages.
+- Houdini/native-bridge alias discovery for addresses that represent the same ARM64 file offset.
+- Alias-aware writes for byte patches and absolute jump patches.
 - Export lookup through `dlopen/dlsym`, `RTLD_DEFAULT`, and manual ELF symbol-table fallback.
 - Live memory read/write with page permission changes and instruction-cache flush.
 - 16-byte ARM64 absolute branch patch:
@@ -68,6 +70,10 @@ guest ARM64 code and the bridge translates it for the x86_64 host. In that setup
 - Do not reject the process just because the host kernel or emulator is x86_64.
 - `System.loadLibrary("template_native")` is the real compatibility test.
 - Pattern bytes and expected prologues must be ARM64 bytes from the target `lib/arm64-v8a/*.so`.
+- Prefer readable module scans for ARM64 signatures; executable-only file-backed ranges can be empty
+  or misleading under native bridge.
+- Write every alias for the same file offset. A patch can verify at one guest address while gameplay
+  still uses another mapping that still contains original bytes.
 - Generic Android inline-hook libraries that depend on their own supported ABI matrix may fail even
   when manual ARM64 guest patching can still work.
 

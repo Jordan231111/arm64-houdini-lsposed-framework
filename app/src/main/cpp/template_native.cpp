@@ -71,7 +71,8 @@ int install_game_hooks_for_module(const std::string &module_name, uintptr_t modu
      *   arm64fw::Pattern pat;
      *   arm64fw::parse_ida_pattern("FD 7B BF A9 FD 03 00 91 ?? ?? ?? ??", &pat);
      *   uintptr_t target = 0;
-     *   arm64fw::find_pattern(arm64fw::module_ranges(module_name, true), pat, &target);
+     *   auto ranges = arm64fw::module_ranges(module_name, false);
+     *   arm64fw::find_pattern(ranges, pat, &target);
      *
      * Stable RVA path:
      *   uintptr_t target = module_base + 0x123456;
@@ -80,6 +81,11 @@ int install_game_hooks_for_module(const std::string &module_name, uintptr_t modu
      *   static const uint8_t expected[] = {0xFD, 0x7B, 0xBF, 0xA9};
      *   arm64fw::install_arm64_absolute_jump("feature_name", target,
      *       reinterpret_cast<uintptr_t>(&replacement), expected, sizeof(expected), nullptr);
+     *
+     * Houdini note:
+     *   Resolve with ARM64 bytes and pass the same ranges to write helpers. The framework writes
+     *   aliases for the same file offset, so a patch can update both the translated guest address
+     *   and the low file-backed lib*.so mapping when native bridge exposes both.
      *
      * The reusable framework deliberately does not guess offsets or replay prologues. Each game
      * branch owns signatures, object layouts, replacement functions, and any trampoline logic.

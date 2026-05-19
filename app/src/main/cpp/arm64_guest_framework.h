@@ -32,6 +32,7 @@ struct PatchRecord {
     uintptr_t target{0};
     uintptr_t replacement{0};
     uintptr_t return_address{0};
+    std::vector<uintptr_t> aliases;
     uint8_t original[16]{};
     bool installed{false};
     std::string message;
@@ -55,6 +56,15 @@ bool find_pattern(const std::vector<MemoryRange> &ranges,
 bool read_memory(uintptr_t address, void *out, std::size_t len);
 bool read_file_backed_memory(uintptr_t address, void *out, std::size_t len);
 bool write_memory(uintptr_t address, const void *data, std::size_t len, std::string *error);
+std::vector<uintptr_t> aliases_for_address(const std::vector<MemoryRange> &known_ranges,
+                                           uintptr_t address,
+                                           std::size_t len);
+bool write_memory_aliases(const std::vector<MemoryRange> &known_ranges,
+                          uintptr_t address,
+                          const void *data,
+                          std::size_t len,
+                          std::vector<uintptr_t> *written_aliases,
+                          std::string *error);
 
 bool install_arm64_absolute_jump(const std::string &name,
                                  uintptr_t target,

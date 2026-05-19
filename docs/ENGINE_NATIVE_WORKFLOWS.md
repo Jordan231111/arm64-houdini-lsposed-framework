@@ -23,6 +23,9 @@ Unreal, Cocos2d-x, Godot, Flutter, or a custom C/C++ core.
    - Prefer stable RVAs only when the library build is pinned.
    - Prefer ARM64 byte signatures when the same feature must survive minor rebuilds.
    - Verify the expected first bytes before writing a branch patch.
+   - On Houdini/native bridge, scan readable ARM64 module ranges and write every alias for the
+     resolved file offset. Do not trust a single high-address readback as proof that gameplay will
+     use the patched bytes.
 
 4. Keep runtime control reversible.
    - Put every behavior behind a bool or numeric feature key.
@@ -97,6 +100,7 @@ For each non-smoke native hook, branch docs should record:
 
 - managed method, native function, RVA, and ABI
 - byte signature and expected prologue
+- resolved file offset and alias addresses written on Houdini/native bridge
 - backing field offsets, if used
 - xrefs or caller evidence
 - hook strategy and runtime setting key

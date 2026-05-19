@@ -1,0 +1,11 @@
+id=com.template.lsposed
+name=LSPosed Universal Template
+version=v0.1.0
+versionCode=1
+author=YourName
+description=Modern libxposed API 101 template with movable overlay and a self-contained ARM64 native framework for authorized testing.
+minApiVersion=101
+targetApiVersion=101
+staticScope=true
+# Protective catches/logs hooker exceptions and lets the original call continue.
+exceptionMode=protective

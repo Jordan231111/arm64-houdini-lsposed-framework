@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a build, template, or stability problem
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this only for authorized testing and template issues. Do not include secrets or proprietary app code.
+  - type: input
+    id: android
+    attributes:
+      label: Android version / device ABI
+      placeholder: Android 14, arm64-v8a
+    validations:
+      required: true
+  - type: input
+    id: lsposed
+    attributes:
+      label: LSPosed or Vector version
+      placeholder: API 101 compatible build
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the Gradle command or runtime action that failed.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Redact private package names, account data, and device identifiers.
+      render: text

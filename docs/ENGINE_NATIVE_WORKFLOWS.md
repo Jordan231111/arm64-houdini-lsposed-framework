@@ -65,6 +65,7 @@ Recommended static pass:
 Important IL2CPP details:
 
 - Dump RVAs are not process addresses. Runtime address is `arm64fw::module_base("libil2cpp.so") + rva`.
+- When dealing with IL2CPP games on Houdini/x86_64 emulators, you must use **Just-In-Time (JIT) Alias Caching** for any byte patching or relative trampolines. Fetch the `readable_ranges` right before you write to memory, NOT during application startup, so Houdini has time to compile the `libil2cpp.so` execution aliases.
 - Exported IL2CPP APIs can be resolved with `arm64fw::resolve_export("libil2cpp.so", "il2cpp_domain_get")`,
   which falls back to a manual `dl_iterate_phdr` ELF lookup when ordinary `dlsym` is blocked by
   linker namespace behavior.

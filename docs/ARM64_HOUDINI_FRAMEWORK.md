@@ -76,6 +76,23 @@ file-backed ranges exist. Some native-bridge builds map the ARM64 library as rea
 pages while execution happens through a translated view, so `module_ranges(module_name, true)` can
 miss the bytes you need to scan.
 
+## The Just-In-Time (JIT) Alias Resolution Strategy
+
+During initial development, it might seem tempting to read `/proc/self/maps` exactly once at the beginning of the program, cache it, and reuse it for all hooks to save disk I/O time. **Do not do this on native bridge.**
+
+When the game starts up on an x86_64 emulator using Houdini, the library `libapp.so` (or `libil2cpp.so`) is initially loaded as a file-backed mapping. It takes a few hundred milliseconds of execution (or pattern scanning) before Houdini compiles and creates the translated guest execution alias in a different region of memory. 
+
+If you cache `/proc/self/maps` too early, your cache will only see the `r--p` (file-backed) alias. Your byte patches will write successfully to the file-backed mapping, log a false positive success, but Houdini will completely ignore the changes because it had already created the `r-xp` execution alias and won't invalidate its cache if the execution alias isn't touched!
+
+**The Advanced Fix:**
+We use a **Just-In-Time (JIT) Alias Resolution** approach. Instead of reading `/proc/self/maps` for every single hit, or caching it globally at startup, we fetch the readable ranges exactly **once per feature**, right before the alias patching loop executes.
+1. The pattern scan (which takes time) runs first.
+2. Houdini builds the translated execution aliases in the background.
+3. We query `/proc/self/maps` immediately before writing.
+4. We write to both the file-backed mapping and the execution alias.
+
+This provides the optimal balance of maximum read/write efficiency while guaranteeing we hit the correct execution memory.
+
 ## Patch Types And Alias Safety
 
 Not every patch type has the same alias rules.
@@ -99,11 +116,7 @@ Relative branch or trampoline patch:
 - Branch immediates are relative to the address where the CPU executes the instruction.
 - If you compute a `b`/`bl` immediate using a high alias and then write the same bytes to the low
   file-backed alias, the branch target can be wrong.
-- For these patches, choose one address view, compute all relative branches in that same view, and
-  write the matching bytes only to aliases where the same relative encoding is valid.
-- If the low file-backed mapping is the behaviorally active path, compute the trampoline using low
-  file-backed addresses.
-- If you cannot prove which alias is active, fail closed and log the candidate aliases.
+- For relative trampoline patches (like a code cave), you must calculate the jump distance. If the code caves are allocated or found inside the target `.so`, the relative jump distance between the original code and the cave is **identical across all mapped aliases**. Thus, it is safe to use `patch_memory_aliases` to write the exact same relative trampoline to both the file-backed and execution aliases, ensuring Houdini captures the hook without crashing.
 
 That is why the framework provides generic alias writing, but it does not pretend to build universal
 manual trampolines. A game branch still owns its own relative branch math.

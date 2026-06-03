@@ -190,6 +190,18 @@ This primitive redirects execution. It does not automatically build a universal 
 replay arbitrary ARM64 instructions. If a hook must call original behavior, the game branch must
 handle that specific prologue and control flow deliberately.
 
+> **Short-function hazard.** This patch is always 16 bytes. IL2CPP accessors are frequently 8-byte
+> leaf functions (`ldr s0,[x0,#off] ; ret`) packed immediately before their setter, so a 16-byte
+> write silently overwrites the *next* function's first bytes. Nothing fails at install time; it
+> crashes much later, the first time the corrupted neighbour is called, with a SIGSEGV that points
+> nowhere near your hook. When hooking a function you cannot prove is at least 16 bytes long, use a
+> 4-byte branch into a near veneer instead (overwrites only the first instruction). The framework
+> ships a worked, Houdini-safe inline-hook engine that does this and provides the call-original
+> trampoline: `app/src/main/cpp/houdini_inline_hook.{h,cpp}` - see
+> [HOUDINI_INLINE_HOOK.md](HOUDINI_INLINE_HOOK.md). It also documents the non-obvious Houdini facts
+> (guest code is `r--` not `r-x`; resolve exports via `dl_iterate_phdr` not `dlsym`; a guest `RET`
+> into anonymous JIT memory corrupts the host translation, so trampolines are memfd-backed).
+
 ## Recommended Game Branch Pattern
 
 1. Set a target package and scope.

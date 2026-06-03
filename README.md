@@ -38,6 +38,11 @@ The reusable native part lives in:
 - `app/src/main/cpp/arm64_guest_framework.cpp`
 - `app/src/main/cpp/template_native.cpp`
 
+An optional, reusable inline-hook engine that calls the original back lives in:
+
+- `app/src/main/cpp/houdini_inline_hook.h`
+- `app/src/main/cpp/houdini_inline_hook.cpp`
+
 It provides:
 
 - `/proc/self/maps` parser with module range and module base helpers.
@@ -53,6 +58,10 @@ It provides:
   - `br x17`
   - 8-byte replacement address
 - Patch records and framework status returned through `NativeBridge.getNativeRecords()`.
+- `HoudiniInlineHook` (`hih::`): the call-original half the primitives above do not provide - a
+  prologue relocator, a 4-byte branch into a near veneer (safe for the 8-byte IL2CPP leaf functions
+  that a 16-byte jump corrupts), and memfd-backed trampolines. See
+  [`docs/HOUDINI_INLINE_HOOK.md`](docs/HOUDINI_INLINE_HOOK.md).
 
 The default template installs no game-specific native hooks. That is intentional. Each target game
 branch owns offsets, signatures, object layouts, feature logic, replacement functions, and any
@@ -185,6 +194,9 @@ or depends on a bundled third-party hook library.
 - `SECURITY.md` - safe issue-reporting expectations.
 - `CONTRIBUTING.md` - contribution and validation expectations.
 - `docs/ARM64_HOUDINI_FRAMEWORK.md` - native bridge restrictions and patcher usage.
+- `docs/HOUDINI_INLINE_HOOK.md` - the optional call-original inline-hook engine and the non-obvious
+  Houdini facts it has to respect (r-- guest mappings, short-function corruption, anonymous-return
+  faults, memfd trampolines).
 - `docs/ENGINE_NATIVE_WORKFLOWS.md` - Unity IL2CPP and native-heavy target notes.
 - `docs/FRIDA_EMULATOR_QUICKSTART.md` - emulator reconnaissance workflow.
 

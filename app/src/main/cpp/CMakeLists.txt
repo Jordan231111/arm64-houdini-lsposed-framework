@@ -9,6 +9,7 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 add_library(template_native SHARED
         template_native.cpp
         arm64_guest_framework.cpp
+        houdini_inline_hook.cpp
         native_utils.cpp
 )
 

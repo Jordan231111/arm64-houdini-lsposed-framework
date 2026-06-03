@@ -80,18 +80,21 @@ miss the bytes you need to scan.
 
 During initial development, it might seem tempting to read `/proc/self/maps` exactly once at the beginning of the program, cache it, and reuse it for all hooks to save disk I/O time. **Do not do this on native bridge.**
 
-When the game starts up on an x86_64 emulator using Houdini, the library `libapp.so` (or `libil2cpp.so`) is initially loaded as a file-backed mapping. It takes a few hundred milliseconds of execution (or pattern scanning) before Houdini compiles and creates the translated guest execution alias in a different region of memory. 
+When the game starts up on an x86_64 emulator, the ARM64 library (`libil2cpp.so`, `libapp.so`, ...) is first mapped file-backed, and the bridge only builds its translated execution view after a few hundred milliseconds of execution (or pattern scanning). The exact shape of that view varies by native-bridge version and build, and two cases have both been observed:
 
-If you cache `/proc/self/maps` too early, your cache will only see the `r--p` (file-backed) alias. Your byte patches will write successfully to the file-backed mapping, log a false positive success, but Houdini will completely ignore the changes because it had already created the `r-xp` execution alias and won't invalidate its cache if the execution alias isn't touched!
+- **Separate execution alias.** On some builds the bridge exposes the translated/executable code as a distinct alias in a different memory region. If you cache `/proc/self/maps` too early you only ever see the early `r--p` file-backed mapping; your write succeeds and logs a false-positive success, but the address that actually executes is the one you never touched.
+- **File-backed only + `mprotect` invalidation.** On other builds - for example the BlueStacks `libnb` + `libhoudini` instance this template was validated against - the guest `.so` is mapped **only `r--p`** (sometimes at more than one address, which is the real alias trap), with no separate `r-xp` `.so` alias at all. There the translated code lives in the bridge's own internal cache, and a write still takes effect because the `mprotect(RW) -> write -> mprotect(restore)` that `write_memory` performs makes the bridge drop its cached translation of those pages and re-translate from the patched bytes.
 
-**The Advanced Fix:**
-We use a **Just-In-Time (JIT) Alias Resolution** approach. Instead of reading `/proc/self/maps` for every single hit, or caching it globally at startup, we fetch the readable ranges exactly **once per feature**, right before the alias patching loop executes.
+Either way the practical rule is identical, which is exactly why caching maps early is wrong: query late, write every alias, and let the `mprotect`-guarded write do the invalidation.
+
+**The Just-In-Time fix:**
+Instead of reading `/proc/self/maps` once globally at startup, fetch the readable ranges **once per feature**, right before the alias patching loop executes.
 1. The pattern scan (which takes time) runs first.
-2. Houdini builds the translated execution aliases in the background.
-3. We query `/proc/self/maps` immediately before writing.
-4. We write to both the file-backed mapping and the execution alias.
+2. The bridge builds/caches its translated execution view in the background.
+3. Query `/proc/self/maps` immediately before writing.
+4. Write to every alias of the target's file offset through `mprotect`-guarded writes (`write_memory_aliases` and `install_arm64_absolute_jump` already do both).
 
-This provides the optimal balance of maximum read/write efficiency while guaranteeing we hit the correct execution memory.
+This is the optimal balance of read/write efficiency while guaranteeing you hit the memory the bridge actually executes - whether that is a second alias or the file-backed page whose cached translation the `mprotect` invalidates.
 
 ## Patch Types And Alias Safety
 
@@ -116,7 +119,7 @@ Relative branch or trampoline patch:
 - Branch immediates are relative to the address where the CPU executes the instruction.
 - If you compute a `b`/`bl` immediate using a high alias and then write the same bytes to the low
   file-backed alias, the branch target can be wrong.
-- For relative trampoline patches (like a code cave), you must calculate the jump distance. If the code caves are allocated or found inside the target `.so`, the relative jump distance between the original code and the cave is **identical across all mapped aliases**. Thus, it is safe to use `patch_memory_aliases` to write the exact same relative trampoline to both the file-backed and execution aliases, ensuring Houdini captures the hook without crashing.
+- For relative trampoline patches (like a code cave), you must calculate the jump distance. If the code caves are allocated or found inside the target `.so`, the relative jump distance between the original code and the cave is **identical across all mapped aliases**. Thus, it is safe to use `write_memory_aliases` to write the exact same relative trampoline to both the file-backed and execution aliases, ensuring Houdini captures the hook without crashing.
 
 That is why the framework provides generic alias writing, but it does not pretend to build universal
 manual trampolines. A game branch still owns its own relative branch math.
